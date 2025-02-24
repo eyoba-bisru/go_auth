@@ -93,6 +93,8 @@ func main() {
 			Value: refreshTokenString,
 		})
 
+		// Save to DB
+
 		var response = map[string]bool{
 			"success": true,
 		}
