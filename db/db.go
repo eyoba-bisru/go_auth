@@ -9,7 +9,7 @@ import (
 
 type User struct {
 	gorm.Model
-	Email    string
+	Email    string `gorm:"unique"`
 	Password string
 }
 
@@ -19,6 +19,8 @@ func Connect() *gorm.DB {
 	if err != nil {
 		log.Fatal("Failed to connect to db")
 	}
+
+	log.Println("Connected successfully")
 
 	db.AutoMigrate(&User{})
 

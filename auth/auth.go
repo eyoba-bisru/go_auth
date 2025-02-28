@@ -132,7 +132,7 @@ func Auth() *chi.Mux {
 			return
 		}
 
-		database.First(&user, "email = ?", parsedBody.Email)
+		database.First(&user, "Email = ?", parsedBody.Email)
 		if user.Email == "" {
 			http.Error(w, "user doen't exit", http.StatusBadRequest)
 			return
