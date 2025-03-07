@@ -5,12 +5,10 @@ import (
 	"net/http"
 	"net/mail"
 	"os"
-	"time"
 
 	"github.com/eyoba-bisru/go_auth/db"
+	"github.com/eyoba-bisru/go_auth/helpers"
 	"github.com/go-chi/chi/v5"
-	"github.com/golang-jwt/jwt/v5"
-	"golang.org/x/crypto/bcrypt"
 )
 
 type Body struct {
@@ -52,7 +50,7 @@ func Auth() *chi.Mux {
 		}
 
 		// hash password
-		hashedPassword, err := HashPassword(parsedBody.Password)
+		hashedPassword, err := helpers.HashPassword(parsedBody.Password)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -60,20 +58,14 @@ func Auth() *chi.Mux {
 
 		secretKey := os.Getenv("SECRET_KEY")
 
-		accessTokenString, err := CreateJWT(jwt.MapClaims{
-			"exp":   time.Now().Add(time.Hour).Unix(),
-			"email": validatedEmail.Address,
-		}, secretKey, true, w)
+		accessTokenString, err := helpers.AccessTokenGenerate(validatedEmail, secretKey)
 
 		if err != nil {
 			http.Error(w, "Access Error", http.StatusInternalServerError)
 			return
 		}
 
-		refreshTokenString, err := CreateJWT(jwt.MapClaims{
-			"exp":   time.Now().Add(time.Hour * 8760).Unix(),
-			"email": validatedEmail.Address,
-		}, secretKey, false, w)
+		refreshTokenString, err := helpers.RefreshTokenGenerate(validatedEmail, secretKey)
 
 		if err != nil {
 			http.Error(w, "Refresh Error", http.StatusInternalServerError)
@@ -138,25 +130,19 @@ func Auth() *chi.Mux {
 			return
 		}
 
-		isVerified := VerifyPassword(parsedBody.Password, user.Password)
+		isVerified := helpers.VerifyPassword(parsedBody.Password, user.Password)
 		if !isVerified {
 			http.Error(w, "wrong email or password", http.StatusBadRequest)
 			return
 		}
 
-		accessTokenString, err := CreateJWT(jwt.MapClaims{
-			"exp":   time.Now().Add(time.Hour).Unix(),
-			"email": validatedEmail.Address,
-		}, secretKey, true, w)
+		accessTokenString, err := helpers.AccessTokenGenerate(validatedEmail, secretKey)
 		if err != nil {
 			http.Error(w, "Access Error", http.StatusInternalServerError)
 			return
 		}
 
-		refreshTokenString, err := CreateJWT(jwt.MapClaims{
-			"exp":   time.Now().Add(time.Hour * 8760).Unix(),
-			"email": validatedEmail.Address,
-		}, secretKey, false, w)
+		refreshTokenString, err := helpers.RefreshTokenGenerate(validatedEmail, secretKey)
 		if err != nil {
 			http.Error(w, "Refresh Error", http.StatusInternalServerError)
 			return
@@ -188,31 +174,4 @@ func Auth() *chi.Mux {
 	})
 
 	return authRoute
-}
-
-func HashPassword(password string) (string, error) {
-	bytes, err := bcrypt.GenerateFromPassword([]byte(password), 14)
-	return string(bytes), err
-}
-
-func VerifyPassword(password, hash string) bool {
-	err := bcrypt.CompareHashAndPassword([]byte(hash), []byte(password))
-	return err == nil
-}
-
-func CreateJWT(claims jwt.MapClaims, secretKey string, isAccess bool, w http.ResponseWriter) (string, error) {
-
-	if isAccess {
-		accessToken := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-
-		accessTokenString, err := accessToken.SignedString([]byte(secretKey))
-
-		return accessTokenString, err
-	}
-	refreshToken := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-
-	refreshTokenString, err := refreshToken.SignedString([]byte(secretKey))
-
-	return refreshTokenString, err
-
 }
