@@ -1,3 +1,3 @@
 # Authentication for go web applications
 
-## Uses `chi` router but it will work for other frameworks
+## Uses [chi](https://go-chi.io/) router but it will work for other frameworks
