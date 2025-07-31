@@ -1,6 +1,7 @@
 package middlewares
 
 import (
+	"fmt"
 	"net/http"
 	"net/mail"
 	"os"
@@ -17,6 +18,7 @@ func Auth(next http.Handler) http.Handler {
 
 		accessCookie, err := r.Cookie("access")
 		if err != nil {
+			fmt.Println(err)
 			http.Error(w, "Unauthorised", http.StatusUnauthorized)
 			return
 		}

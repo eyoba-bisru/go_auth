@@ -2,8 +2,9 @@ package db
 
 import (
 	"log"
+	"os"
 
-	"gorm.io/driver/sqlite"
+	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 )
 
@@ -13,16 +14,22 @@ type User struct {
 	Password string
 }
 
-func Connect() *gorm.DB {
-	db, err := gorm.Open(sqlite.Open("auth.db"), &gorm.Config{})
+var db *gorm.DB
 
+func Connect() {
+	dsn := os.Getenv("DATABASE_URL")
+	DB, err := gorm.Open(postgres.Open(dsn), &gorm.Config{})
 	if err != nil {
-		log.Fatal("Failed to connect to db")
+		log.Fatal("Failed to connect to DB")
 	}
+	log.Println("Connected successfully to PostgreSQL")
 
-	log.Println("Connected successfully")
+	db = DB
 
-	db.AutoMigrate(&User{})
+	DB.AutoMigrate(&User{})
 
+}
+
+func GetDB() *gorm.DB {
 	return db
 }
