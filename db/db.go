@@ -10,8 +10,8 @@ import (
 
 type User struct {
 	gorm.Model
-	Email    string `gorm:"unique"`
-	Password string
+	Email    string `gorm:"unique, not null"`
+	Password string `gorm:"not null, min:6"`
 }
 
 var db *gorm.DB

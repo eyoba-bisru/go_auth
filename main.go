@@ -9,8 +9,7 @@ import (
 	"github.com/eyoba-bisru/go_auth/config"
 	"github.com/eyoba-bisru/go_auth/handlers"
 	"github.com/eyoba-bisru/go_auth/middlewares"
-	"github.com/go-chi/chi/v5"
-	"github.com/go-chi/chi/v5/middleware"
+	"github.com/gin-gonic/gin"
 )
 
 func main() {
@@ -22,24 +21,24 @@ func main() {
 		PORT = "8080"
 	}
 
-	r := chi.NewRouter()
-	r.Use(middleware.Logger)
-	r.Use(middleware.Recoverer)
-	r.Get("/", func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte("Hello World"))
+	r := gin.Default()
+
+	r.GET("/", func(c *gin.Context) {
+		c.String(http.StatusOK, "Welcome to the Go Auth API")
 	})
 
-	r.Post("/signup", handlers.SignupHandler)
+	r.POST("/auth/signup", handlers.SignupHandler)
 
-	r.Post("/signin", handlers.SigninHandler)
+	r.POST("/auth/signin", handlers.SigninHandler)
 
-	r.Route("/protected", func(r chi.Router) {
-		r.Use(middlewares.Auth)
-		r.Get("/", func(w http.ResponseWriter, r *http.Request) {
-			w.Write([]byte("Protected Route"))
+	protectedGroup := r.Group("/protected")
+	protectedGroup.Use(middlewares.Auth())
+	{
+		protectedGroup.GET("/", func(c *gin.Context) {
+			c.String(http.StatusOK, "Protected Route")
 		})
-	})
+	}
 
 	log.Printf("Server running on port :%s", PORT)
-	http.ListenAndServe(fmt.Sprintf(":%s", PORT), r)
+	r.Run(fmt.Sprintf(":%s", PORT))
 }

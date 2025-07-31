@@ -1,7 +1,6 @@
 package helpers
 
 import (
-	"net/mail"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -34,16 +33,16 @@ func CreateJWT(claims jwt.MapClaims, secretKey string, isAccess bool) (string, e
 	return refreshTokenString, err
 }
 
-func AccessTokenGenerate(validatedEmail *mail.Address, secretKey string) (string, error) {
+func AccessTokenGenerate(email, secretKey string) (string, error) {
 	return CreateJWT(jwt.MapClaims{
 		"exp":   time.Now().Add(time.Minute * time.Duration(15)).Unix(),
-		"email": validatedEmail.Address,
+		"email": email,
 	}, secretKey, true)
 }
 
-func RefreshTokenGenerate(validatedEmail *mail.Address, secretKey string) (string, error) {
+func RefreshTokenGenerate(email, secretKey string) (string, error) {
 	return CreateJWT(jwt.MapClaims{
 		"exp":   time.Now().Add(time.Hour * time.Duration(48)).Unix(),
-		"email": validatedEmail.Address,
+		"email": email,
 	}, secretKey, false)
 }

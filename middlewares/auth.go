@@ -3,87 +3,82 @@ package middlewares
 import (
 	"fmt"
 	"net/http"
-	"net/mail"
 	"os"
+	"time"
 
 	"github.com/eyoba-bisru/go_auth/helpers"
+	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
 )
 
-func Auth(next http.Handler) http.Handler {
-
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-
+func Auth() gin.HandlerFunc {
+	return func(c *gin.Context) {
 		secretKey := os.Getenv("SECRET_KEY")
+		if secretKey == "" {
 
-		accessCookie, err := r.Cookie("access")
-		if err != nil {
-			fmt.Println(err)
-			http.Error(w, "Unauthorised", http.StatusUnauthorized)
+			c.AbortWithStatus(http.StatusInternalServerError)
 			return
 		}
 
-		accessTokenString := accessCookie.Value
-		accessToken, err := jwt.Parse(accessTokenString, func(token *jwt.Token) (interface{}, error) {
+		accessCookie, err := c.Cookie("access")
+		if err == nil {
+			accessToken, err := jwt.Parse(accessCookie, func(token *jwt.Token) (interface{}, error) {
+				if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+					return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
+				}
+				return []byte(secretKey), nil
+			})
+
+			if err == nil && accessToken.Valid {
+
+				c.Next()
+				return
+			}
+
+		}
+
+		refreshCookie, refreshErr := c.Cookie("refresh")
+
+		if refreshErr != nil {
+			c.AbortWithStatus(http.StatusUnauthorized)
+			return
+		}
+
+		refreshToken, err := jwt.Parse(refreshCookie, func(token *jwt.Token) (interface{}, error) {
 			if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
-				return nil, http.ErrAbortHandler
+				return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
 			}
 			return []byte(secretKey), nil
 		})
-		if err != nil {
-			http.Error(w, "Unauthorised", http.StatusUnauthorized)
-			return
-		}
 
-		if accessToken.Valid {
-			next.ServeHTTP(w, r)
-			return
-		}
-
-		refreshCookie, err := r.Cookie("refresh")
-		if err != nil {
-			http.Error(w, "Unauthorised", http.StatusUnauthorized)
-			return
-		}
-
-		refreshTokenString := refreshCookie.Value
-		refreshToken, err := jwt.Parse(refreshTokenString, func(token *jwt.Token) (interface{}, error) {
-			if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
-				return nil, http.ErrAbortHandler
-			}
-			return []byte(secretKey), nil
-		})
 		if err != nil || !refreshToken.Valid {
-			http.Error(w, "Unauthorised", http.StatusUnauthorized)
+
+			c.AbortWithStatus(http.StatusUnauthorized)
 			return
 		}
 
 		if claims, ok := refreshToken.Claims.(jwt.MapClaims); ok {
-			email := claims["email"].(string)
-			parsedEmail, err := mail.ParseAddress(email)
-			if err != nil {
-				http.Error(w, "Unauthorised", http.StatusUnauthorized)
+			email, ok := claims["email"].(string)
+			if !ok {
+				c.AbortWithStatus(http.StatusUnauthorized)
 				return
 			}
 
-			newAccessTokenString, err := helpers.AccessTokenGenerate(parsedEmail, secretKey)
+			newAccessTokenString, err := helpers.AccessTokenGenerate(email, secretKey)
 			if err != nil {
-				http.Error(w, "Unauthorised", http.StatusUnauthorized)
+				c.AbortWithStatus(http.StatusInternalServerError)
 				return
 			}
 
-			http.SetCookie(w, &http.Cookie{
-				Name:  "access",
-				Value: newAccessTokenString,
-			})
-			http.SetCookie(w, &http.Cookie{
-				Name:  "refresh",
-				Value: refreshTokenString,
-			})
+			c.SetCookie("access", newAccessTokenString, int(time.Hour.Seconds()), "/", c.Request.Host, false, true)
+
+			c.Next()
+			return
+
 		} else {
-			http.Error(w, "Unauthorised", http.StatusUnauthorized)
-		}
 
-		next.ServeHTTP(w, r)
-	})
+			c.AbortWithStatus(http.StatusUnauthorized)
+			return
+		}
+	}
 }

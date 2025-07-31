@@ -1,169 +1,131 @@
 package handlers
 
 import (
-	"encoding/json"
+	"log"
 	"net/http"
-	"net/mail"
 	"os"
 
 	"github.com/eyoba-bisru/go_auth/db"
 	"github.com/eyoba-bisru/go_auth/helpers"
+	"github.com/gin-gonic/gin"
 )
 
 type Body struct {
-	Email    string `json:"email"`
-	Password string `json:"password"`
+	Email    string `json:"email" binding:"required,email"`
+	Password string `json:"password" binding:"required,min=6"`
 }
 
-var database = db.GetDB()
-
-var user db.User
-
-func SignupHandler(w http.ResponseWriter, r *http.Request) {
+func SignupHandler(c *gin.Context) {
+	database := db.GetDB()
 	var parsedBody Body
-	err := json.NewDecoder(r.Body).Decode(&parsedBody)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+
+	if err := c.ShouldBindJSON(&parsedBody); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request body", "details": err.Error()})
 		return
 	}
 
-	// Validate
-	if parsedBody.Email == "" || parsedBody.Password == "" {
-		http.Error(w, "email or password missing", http.StatusBadRequest)
+	var user db.User
+	if err := database.First(&user, "email = ?", parsedBody.Email).Error; err == nil {
+
+		c.JSON(http.StatusBadRequest, gin.H{"error": "User with this email already exists"})
+		return
+	} else if err.Error() != "record not found" {
+
+		log.Printf("Database error checking user existence: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to check user existence"})
 		return
 	}
 
-	validatedEmail, err := mail.ParseAddress(parsedBody.Email)
-	if err != nil {
-		http.Error(w, "invalid email", http.StatusBadRequest)
-		return
-	}
-
-	database.First(&user, "email = ?", parsedBody.Email)
-	if user.Email != "" {
-		http.Error(w, "user already exit", http.StatusBadRequest)
-		return
-	}
-
-	// hash password
 	hashedPassword, err := helpers.HashPassword(parsedBody.Password)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		log.Printf("Error hashing password: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to hash password"})
 		return
 	}
 
 	secretKey := os.Getenv("SECRET_KEY")
-
-	accessTokenString, err := helpers.AccessTokenGenerate(validatedEmail, secretKey)
-
-	if err != nil {
-		http.Error(w, "Access Error", http.StatusInternalServerError)
+	if secretKey == "" {
+		log.Println("SECRET_KEY environment variable not set")
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Server configuration error"})
 		return
 	}
 
-	refreshTokenString, err := helpers.RefreshTokenGenerate(validatedEmail, secretKey)
-
+	accessTokenString, err := helpers.AccessTokenGenerate(parsedBody.Email, secretKey)
 	if err != nil {
-		http.Error(w, "Refresh Error", http.StatusInternalServerError)
+		log.Printf("Error generating access token: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to generate access token"})
 		return
 	}
 
-	http.SetCookie(w, &http.Cookie{
-		Name:  "access",
-		Value: accessTokenString,
-	})
-
-	http.SetCookie(w, &http.Cookie{
-		Name:  "refresh",
-		Value: refreshTokenString,
-	})
-
-	// Save to DB
-
-	database.Create(&db.User{Email: parsedBody.Email, Password: hashedPassword})
-
-	var response = map[string]bool{
-		"success": true,
-	}
-
-	res, err := json.Marshal(&response)
-
+	refreshTokenString, err := helpers.RefreshTokenGenerate(parsedBody.Email, secretKey)
 	if err != nil {
-		http.Error(w, "Marshal Error", http.StatusInternalServerError)
+		log.Printf("Error generating refresh token: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to generate refresh token"})
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	w.Write(res)
+	c.SetCookie("access", accessTokenString, 3600, "/", "localhost", false, true)
+	c.SetCookie("refresh", refreshTokenString, 24*30*3600, "/", "localhost", false, true)
+
+	newUser := db.User{Email: parsedBody.Email, Password: hashedPassword}
+	if err := database.Create(&newUser).Error; err != nil {
+		log.Printf("Error saving new user to database: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to register user"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"success": true, "message": "User registered successfully"})
 }
 
-func SigninHandler(w http.ResponseWriter, r *http.Request) {
+func SigninHandler(c *gin.Context) {
+	database := db.GetDB()
 	var parsedBody Body
 
+	if err := c.ShouldBindJSON(&parsedBody); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request body", "details": err.Error()})
+		return
+	}
+
 	secretKey := os.Getenv("SECRET_KEY")
-
-	err := json.NewDecoder(r.Body).Decode(&parsedBody)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+	if secretKey == "" {
+		log.Println("SECRET_KEY environment variable not set")
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Server configuration error"})
 		return
 	}
 
-	// Validate
-	if parsedBody.Email == "" || parsedBody.Password == "" {
-		http.Error(w, "email or password missing", http.StatusBadRequest)
-		return
-	}
-
-	validatedEmail, err := mail.ParseAddress(parsedBody.Email)
-	if err != nil {
-		http.Error(w, "invalid email", http.StatusBadRequest)
-		return
-	}
-
-	database.First(&user, "email = ?", parsedBody.Email)
-	if user.Email == "" {
-		http.Error(w, "user doen't exit", http.StatusBadRequest)
+	var user db.User
+	if err := database.First(&user, "email = ?", parsedBody.Email).Error; err != nil {
+		if err.Error() == "record not found" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "User with this email does not exist"})
+		} else {
+			log.Printf("Database error checking user existence: %v", err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to check user existence"})
+		}
 		return
 	}
 
 	isVerified := helpers.VerifyPassword(parsedBody.Password, user.Password)
 	if !isVerified {
-		http.Error(w, "wrong email or password", http.StatusBadRequest)
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid email or password"})
 		return
 	}
 
-	accessTokenString, err := helpers.AccessTokenGenerate(validatedEmail, secretKey)
+	accessTokenString, err := helpers.AccessTokenGenerate(parsedBody.Email, secretKey)
 	if err != nil {
-		http.Error(w, "Access Error", http.StatusInternalServerError)
+		log.Printf("Error generating access token: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to generate access token"})
 		return
 	}
 
-	refreshTokenString, err := helpers.RefreshTokenGenerate(validatedEmail, secretKey)
+	refreshTokenString, err := helpers.RefreshTokenGenerate(parsedBody.Email, secretKey)
 	if err != nil {
-		http.Error(w, "Refresh Error", http.StatusInternalServerError)
+		log.Printf("Error generating refresh token: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to generate refresh token"})
 		return
 	}
 
-	http.SetCookie(w, &http.Cookie{
-		Name:  "access",
-		Value: accessTokenString,
-	})
-	http.SetCookie(w, &http.Cookie{
-		Name:  "refresh",
-		Value: refreshTokenString,
-	})
+	c.SetCookie("access", accessTokenString, 3600, "/", "localhost", false, true)
+	c.SetCookie("refresh", refreshTokenString, 24*30*3600, "/", "localhost", false, true)
 
-	var response = map[string]bool{
-		"success": true,
-	}
-
-	res, err := json.Marshal(&response)
-
-	if err != nil {
-		http.Error(w, "Marshal Error", http.StatusInternalServerError)
-		return
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	w.Write(res)
+	c.JSON(http.StatusOK, gin.H{"success": true, "message": "User logged in successfully"})
 }
