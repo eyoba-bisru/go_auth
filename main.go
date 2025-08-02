@@ -30,6 +30,8 @@ func main() {
 	r.POST("/auth/signup", handlers.SignupHandler)
 
 	r.POST("/auth/signin", handlers.SigninHandler)
+	r.GET("/auth/:provider", handlers.OAuthLoginHandler)
+	r.GET("/auth/:provider/callback", handlers.OAuthCallbackHandler)
 
 	protectedGroup := r.Group("/protected")
 	protectedGroup.Use(middlewares.Auth())

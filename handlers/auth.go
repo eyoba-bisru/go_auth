@@ -1,13 +1,16 @@
 package handlers
 
 import (
+	"encoding/json"
 	"log"
 	"net/http"
 	"os"
 
+	"github.com/eyoba-bisru/go_auth/config"
 	"github.com/eyoba-bisru/go_auth/db"
 	"github.com/eyoba-bisru/go_auth/helpers"
 	"github.com/gin-gonic/gin"
+	"golang.org/x/oauth2"
 )
 
 type Body struct {
@@ -128,4 +131,60 @@ func SigninHandler(c *gin.Context) {
 	c.SetCookie("refresh", refreshTokenString, 24*30*3600, "/", "localhost", false, true)
 
 	c.JSON(http.StatusOK, gin.H{"success": true, "message": "User logged in successfully"})
+}
+
+func OAuthLoginHandler(c *gin.Context) {
+	provider := c.Param("provider")
+	if provider != "google" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Unsupported provider"})
+		return
+	}
+	config := config.GoogleConfig()
+	url := config.AuthCodeURL("state", oauth2.AccessTypeOffline)
+	c.Redirect(http.StatusTemporaryRedirect, url)
+}
+
+func OAuthCallbackHandler(c *gin.Context) {
+	provider := c.Param("provider")
+	if provider != "google" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Unsupported provider"})
+		return
+	}
+
+	config := config.GoogleConfig()
+	code := c.Query("code")
+	token, err := config.Exchange(c, code)
+	if err != nil {
+		log.Printf("Error exchanging code for token: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to exchange code for token"})
+		return
+	}
+
+	if token == nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to retrieve token"})
+		return
+	}
+
+	c.SetCookie("access", token.AccessToken, 3600, "/", "localhost", false, true)
+
+	client := config.Client(c, token)
+	userInfoResp, err := client.Get("https://www.googleapis.com/oauth2/v1/userinfo?alt=json")
+	if err != nil {
+		log.Printf("Error fetching user info: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch user info"})
+		return
+	}
+	defer userInfoResp.Body.Close()
+
+	var userInfo map[string]interface{}
+	if err := json.NewDecoder(userInfoResp.Body).Decode(&userInfo); err != nil {
+		log.Printf("Error decoding user info response: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to decode user info response"})
+		return
+	}
+
+	email := userInfo["email"].(string)
+	log.Printf("User authenticated with email: %s", email)
+
+	c.JSON(http.StatusOK, gin.H{"success": true, "message": "User authenticated successfully", "email": email})
 }
